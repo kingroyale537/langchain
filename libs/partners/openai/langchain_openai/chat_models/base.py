@@ -1175,6 +1175,14 @@ class BaseChatOpenAI(BaseChatModel):
     names) in the response headers. Enable to capture these metadata.
     """
 
+    include_retries_taken: bool = False
+    """Whether to include retries taken count in `response_metadata`.
+
+    Note: requires the underlying OpenAI client to have attempted the request.
+    If enabled, `response_metadata['retries_taken']` will contain the integer count
+    of retries taken for the response.
+    """
+
     disabled_params: dict[str, Any] | None = Field(default=None)
     """Parameters of the OpenAI client or `chat.completions` endpoint that should be
     disabled for the given model.
@@ -1713,13 +1721,23 @@ class BaseChatOpenAI(BaseChatModel):
         headers: dict = {}
         base_generation_info: dict = {}
         try:
-            if self.include_response_headers or self._uses_gateway:
+            if (
+                self.include_response_headers
+                or self._uses_gateway
+                or self.include_retries_taken
+            ):
                 raw_context_manager = (
                     self.root_client.with_raw_response.responses.create(**payload)
                 )
                 context_manager = raw_context_manager.parse()
                 if self.include_response_headers:
                     headers = {"headers": dict(raw_context_manager.headers)}
+                if self.include_retries_taken and hasattr(
+                    raw_context_manager, "retries_taken"
+                ):
+                    base_generation_info["retries_taken"] = (
+                        raw_context_manager.retries_taken
+                    )
                 _add_gateway_metadata(base_generation_info, raw_context_manager)
             else:
                 context_manager = self.root_client.responses.create(**payload)
@@ -1781,7 +1799,11 @@ class BaseChatOpenAI(BaseChatModel):
         headers: dict = {}
         base_generation_info: dict = {}
         try:
-            if self.include_response_headers or self._uses_gateway:
+            if (
+                self.include_response_headers
+                or self._uses_gateway
+                or self.include_retries_taken
+            ):
                 raw_context_manager = (
                     await self.root_async_client.with_raw_response.responses.create(
                         **payload
@@ -1790,6 +1812,12 @@ class BaseChatOpenAI(BaseChatModel):
                 context_manager = raw_context_manager.parse()
                 if self.include_response_headers:
                     headers = {"headers": dict(raw_context_manager.headers)}
+                if self.include_retries_taken and hasattr(
+                    raw_context_manager, "retries_taken"
+                ):
+                    base_generation_info["retries_taken"] = (
+                        raw_context_manager.retries_taken
+                    )
                 _add_gateway_metadata(base_generation_info, raw_context_manager)
             else:
                 context_manager = await self.root_async_client.responses.create(
@@ -1889,17 +1917,32 @@ class BaseChatOpenAI(BaseChatModel):
                         "Cannot currently include response headers when "
                         "response_format is specified."
                     )
+                if self.include_retries_taken:
+                    warnings.warn(
+                        "Cannot currently include retries taken when "
+                        "response_format is specified."
+                    )
                 payload.pop("stream")
                 response_stream = self.root_client.beta.chat.completions.stream(
                     **payload
                 )
                 context_manager = response_stream
             else:
-                if self.include_response_headers or self._uses_gateway:
+                if (
+                    self.include_response_headers
+                    or self._uses_gateway
+                    or self.include_retries_taken
+                ):
                     raw_response = self.client.with_raw_response.create(**payload)
                     response = raw_response.parse()
                     if self.include_response_headers:
                         base_generation_info = {"headers": dict(raw_response.headers)}
+                    if self.include_retries_taken and hasattr(
+                        raw_response, "retries_taken"
+                    ):
+                        base_generation_info["retries_taken"] = (
+                            raw_response.retries_taken
+                        )
                     _add_gateway_metadata(base_generation_info, raw_response)
                 else:
                     response = self.client.create(**payload)
@@ -1973,6 +2016,10 @@ class BaseChatOpenAI(BaseChatModel):
                 if self.include_response_headers:
                     generation_info = {"headers": dict(raw_response.headers)}
                 generation_info = generation_info or {}
+                if self.include_retries_taken and hasattr(
+                    raw_response, "retries_taken"
+                ):
+                    generation_info["retries_taken"] = raw_response.retries_taken
                 _add_gateway_metadata(generation_info, raw_response)
                 # Gateway metadata belongs on `generation_info`, not the message
                 # `response_metadata` that `metadata` populates.
@@ -2010,6 +2057,12 @@ class BaseChatOpenAI(BaseChatModel):
         ):
             generation_info = {"headers": dict(raw_response.headers)}
         generation_info = generation_info or {}
+        if (
+            self.include_retries_taken
+            and raw_response is not None
+            and hasattr(raw_response, "retries_taken")
+        ):
+            generation_info["retries_taken"] = raw_response.retries_taken
         _add_gateway_metadata(generation_info, raw_response)
         return self._create_chat_result(response, generation_info)
 
@@ -2184,19 +2237,34 @@ class BaseChatOpenAI(BaseChatModel):
                         "Cannot currently include response headers when "
                         "response_format is specified."
                     )
+                if self.include_retries_taken:
+                    warnings.warn(
+                        "Cannot currently include retries taken when "
+                        "response_format is specified."
+                    )
                 payload.pop("stream")
                 response_stream = self.root_async_client.beta.chat.completions.stream(
                     **payload
                 )
                 context_manager = response_stream
             else:
-                if self.include_response_headers or self._uses_gateway:
+                if (
+                    self.include_response_headers
+                    or self._uses_gateway
+                    or self.include_retries_taken
+                ):
                     raw_response = await self.async_client.with_raw_response.create(
                         **payload
                     )
                     response = raw_response.parse()
                     if self.include_response_headers:
                         base_generation_info = {"headers": dict(raw_response.headers)}
+                    if self.include_retries_taken and hasattr(
+                        raw_response, "retries_taken"
+                    ):
+                        base_generation_info["retries_taken"] = (
+                            raw_response.retries_taken
+                        )
                     _add_gateway_metadata(base_generation_info, raw_response)
                 else:
                     response = await self.async_client.create(**payload)
@@ -2276,6 +2344,11 @@ class BaseChatOpenAI(BaseChatModel):
                 response = raw_response.parse()
                 if self.include_response_headers:
                     generation_info = {"headers": dict(raw_response.headers)}
+                generation_info = generation_info or {}
+                if self.include_retries_taken and hasattr(
+                    raw_response, "retries_taken"
+                ):
+                    generation_info["retries_taken"] = raw_response.retries_taken
                 _add_gateway_metadata(generation_info, raw_response)
                 # Gateway metadata belongs on `generation_info`, not the message
                 # `response_metadata` that `metadata` populates.
@@ -2314,6 +2387,12 @@ class BaseChatOpenAI(BaseChatModel):
             and hasattr(raw_response, "headers")
         ):
             generation_info = {"headers": dict(raw_response.headers)}
+        if (
+            self.include_retries_taken
+            and raw_response is not None
+            and hasattr(raw_response, "retries_taken")
+        ):
+            generation_info["retries_taken"] = raw_response.retries_taken
         _add_gateway_metadata(generation_info, raw_response)
         return await run_in_executor(
             None, self._create_chat_result, response, generation_info

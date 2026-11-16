@@ -783,6 +783,72 @@ async def test_openai_ainvoke(mock_async_client: AsyncMock) -> None:
     assert mock_async_client.with_raw_response.create.called
 
 
+def test_openai_invoke_include_retries_taken(mock_client: MagicMock) -> None:
+    mock_resp = mock_client.with_raw_response.create.return_value
+    mock_resp.retries_taken = 3
+
+    # Default False: retries_taken not in response_metadata
+    llm_default = ChatOpenAI()
+    with patch.object(llm_default, "client", mock_client):
+        res = llm_default.invoke("bar")
+        assert "retries_taken" not in res.response_metadata
+
+    # Enabled: retries_taken is in response_metadata
+    llm = ChatOpenAI(include_retries_taken=True)
+    with patch.object(llm, "client", mock_client):
+        res = llm.invoke("bar")
+        assert res.response_metadata.get("retries_taken") == 3
+
+
+async def test_openai_ainvoke_include_retries_taken(
+    mock_async_client: AsyncMock,
+) -> None:
+    mock_resp = mock_async_client.with_raw_response.create.return_value
+    mock_resp.retries_taken = 2
+
+    # Default False: retries_taken not in response_metadata
+    llm_default = ChatOpenAI()
+    with patch.object(llm_default, "async_client", mock_async_client):
+        res = await llm_default.ainvoke("bar")
+        assert "retries_taken" not in res.response_metadata
+
+    # Enabled: retries_taken is in response_metadata
+    llm = ChatOpenAI(include_retries_taken=True)
+    with patch.object(llm, "async_client", mock_async_client):
+        res = await llm.ainvoke("bar")
+        assert res.response_metadata.get("retries_taken") == 2
+
+
+def test_openai_stream_include_retries_taken(
+    mock_openai_completion: list,
+) -> None:
+    llm = ChatOpenAI(model=OPENAI_TEST_MODEL, include_retries_taken=True)
+    mock_client = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.retries_taken = 4
+    mock_resp.parse.return_value = MockSyncContextManager(mock_openai_completion)
+    mock_client.with_raw_response.create.return_value = mock_resp
+
+    with patch.object(llm, "client", mock_client):
+        chunks = list(llm.stream("test prompt"))
+        assert chunks[0].response_metadata.get("retries_taken") == 4
+
+
+async def test_openai_astream_include_retries_taken(
+    mock_openai_completion: list,
+) -> None:
+    llm = ChatOpenAI(model=OPENAI_TEST_MODEL, include_retries_taken=True)
+    mock_client = AsyncMock()
+    mock_resp = MagicMock()
+    mock_resp.retries_taken = 5
+    mock_resp.parse.return_value = MockAsyncContextManager(mock_openai_completion)
+    mock_client.with_raw_response.create.return_value = mock_resp
+
+    with patch.object(llm, "async_client", mock_client):
+        chunks = [chunk async for chunk in llm.astream("test prompt")]
+        assert chunks[0].response_metadata.get("retries_taken") == 5
+
+
 class _GatewayMetadataTracer(BaseTracer):
     """Captures gateway metadata promoted onto completed LLM runs."""
 
